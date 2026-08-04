@@ -146,26 +146,29 @@ tables, and snapshot controls. Ghost records are disabled: every vault key must 
 back to a source row.
 
 ```mermaid
-flowchart LR
-    meterSource[core_raw.smart_meter_events] --> meterStage[staging.stg_meter_readings]
-    priceSource[core_raw.electricity_prices] --> priceStage[staging.stg_electricity_prices]
+graph LR
+    meterSource["core_raw.smart_meter_events"] --> meterStage["staging.stg_meter_readings"]
+    priceSource["core_raw.electricity_prices"] --> priceStage["staging.stg_electricity_prices"]
 
-    subgraph RDV[Raw Data Vault]
-        hm[hub_meter]
-        hr[hub_reading]
-        hz[hub_pricing_zone]
-        hp[hub_price]
-        lmr[link_meter_reading]
-        lmz[link_meter_pricing_zone]
-        lzp[link_pricing_zone_price]
-        sm[sat_meter_details]
-        sr[sat_reading_metrics]
-        sz[sat_pricing_zone_details]
-        sp[sat_price_details]
+    subgraph RDV["Raw Data Vault"]
+        hm["hub_meter"]
+        hr["hub_reading"]
+        hz["hub_pricing_zone"]
+        hp["hub_price"]
+        lmr["link_meter_reading"]
+        lmz["link_meter_pricing_zone"]
+        lzp["link_pricing_zone_price"]
+        sm["sat_meter_details"]
+        sr["sat_reading_metrics"]
+        sz["sat_pricing_zone_details"]
+        sp["sat_price_details"]
 
-        hm --- lmr --- hr
-        hm --- lmz --- hz
-        hz --- lzp --- hp
+        hm --- lmr
+        lmr --- hr
+        hm --- lmz
+        lmz --- hz
+        hz --- lzp
+        lzp --- hp
         hm --- sm
         hr --- sr
         hz --- sz
@@ -180,13 +183,13 @@ flowchart LR
     priceStage --> hp
     priceStage --> lzp
 
-    subgraph BV[Business Data Vault]
-        snap0[control_snap_v0]
-        snap1[control_snap_v1]
-        pitMeter[pit_meter]
-        pitReading[pit_reading]
-        pitZone[pit_pricing_zone]
-        pitPrice[pit_price]
+    subgraph BV["Business Data Vault"]
+        snap0["control_snap_v0"]
+        snap1["control_snap_v1"]
+        pitMeter["pit_meter"]
+        pitReading["pit_reading"]
+        pitZone["pit_pricing_zone"]
+        pitPrice["pit_price"]
 
         snap0 --> snap1
         snap1 --> pitMeter
@@ -204,10 +207,10 @@ flowchart LR
     hp --> pitPrice
     sp --> pitPrice
 
-    subgraph INFO[Information layer]
-        intReadings[int_meter_readings]
-        intPrices[int_electricity_prices]
-        intPriced[int_meter_readings_priced]
+    subgraph INFO["Information Layer"]
+        intReadings["int_meter_readings"]
+        intPrices["int_electricity_prices"]
+        intPriced["int_meter_readings_priced"]
 
         intReadings --> intPriced
         intPrices --> intPriced
@@ -224,15 +227,15 @@ flowchart LR
     sz --> intPrices
     sp --> intPrices
 
-    subgraph PRES[Presentation Layer]
-        dimDate[dim_date]
-        dimTime[dim_time]
-        dimMeter[dim_meter]
-        dimZone[dim_pricing_zone]
-        factReadings[fact_meter_reading]
-        factBilling[fact_hourly_energy_billing]
-        martOperations[mart_meter_operations_periodic]
-        martBilling[mart_executive_billing_periodic]
+    subgraph PRES["Presentation Layer"]
+        dimDate["dim_date"]
+        dimTime["dim_time"]
+        dimMeter["dim_meter"]
+        dimZone["dim_pricing_zone"]
+        factReadings["fact_meter_reading"]
+        factBilling["fact_hourly_energy_billing"]
+        martOperations["mart_meter_operations_periodic"]
+        martBilling["mart_executive_billing_periodic"]
 
         factReadings --> martOperations
         dimMeter --> martOperations
@@ -250,9 +253,9 @@ flowchart LR
     dimDate --> factBilling
     dimTime --> factBilling
 
-    factReadings --> metrics[MetricFlow metrics]
+    factReadings --> metrics["MetricFlow metrics"]
     factBilling --> metrics
-    martOperations --> bi[Superset dashboards]
+    martOperations --> bi["Superset dashboards"]
     martBilling --> bi
 ```
 
