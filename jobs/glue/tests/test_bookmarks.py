@@ -37,7 +37,9 @@ def test_unprocessed_s3_objects_excludes_committed_objects(monkeypatch) -> None:
     client = Mock()
     client.get_paginator.return_value = paginator
     monkeypatch.setattr(LocalObjectBookmarks, "table", property(lambda _self: table))
-    monkeypatch.setattr("glue_lib.bookmarks.boto3.client", lambda *_args, **_kwargs: client)
+    monkeypatch.setattr(
+        "glue_lib.bookmarks.boto3.client", lambda *_args, **_kwargs: client
+    )
 
     bookmarks = LocalObjectBookmarks(runtime(), "bookmarks", "raw_to_curated")
 

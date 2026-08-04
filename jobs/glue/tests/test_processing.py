@@ -87,8 +87,7 @@ def test_weekly_backfill_uses_monday_boundaries_and_daily_partition_paths() -> N
         (26, 27),
     ]
     assert window.batch_windows()[1].source_paths("s3://raw/events/") == [
-        f"s3://raw/events/year=2026/month=01/day={day:02d}/"
-        for day in range(19, 26)
+        f"s3://raw/events/year=2026/month=01/day={day:02d}/" for day in range(19, 26)
     ]
 
 

@@ -36,9 +36,7 @@ def test_validation_casts_splits_deduplicates_and_reports_reasons(
     monkeypatch.setattr(
         GlueJob,
         "_write_rejected_records",
-        lambda _self, records, **_kwargs: (
-            rejected.extend(records.collect()) or True
-        ),
+        lambda _self, records, **_kwargs: (rejected.extend(records.collect()) or True),
     )
     job = GlueJob(
         required_arguments=(),

@@ -215,9 +215,7 @@ class GlueJob:
         )
         return True
 
-    def _write_rejected_records(
-        self, records: DataFrame, *, error_type: str
-    ) -> bool:
+    def _write_rejected_records(self, records: DataFrame, *, error_type: str) -> bool:
         """Write rejected records without creating empty quarantine objects."""
 
         if records.isEmpty():

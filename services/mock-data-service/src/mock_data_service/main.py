@@ -41,8 +41,10 @@ def run_provider(provider: object) -> None:
 def backfill_window(days: int, now: datetime | None = None) -> tuple[datetime, datetime]:
     if days < 1:
         raise ValueError("--days must be a positive number")
-    end = (now or datetime.now(UTC)).astimezone(UTC).replace(
-        hour=0, minute=0, second=0, microsecond=0
+    end = (
+        (now or datetime.now(UTC))
+        .astimezone(UTC)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
     )
     return end - timedelta(days=days), end
 
