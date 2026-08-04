@@ -1,0 +1,60 @@
+version: 2
+models:
+  - name: hub_meter
+    columns:
+      - name: hk_meter_h
+        data_tests: [not_null, unique]
+      - name: meter_id
+        data_tests: [not_null, unique]
+  - name: hub_reading
+    columns:
+      - name: hk_reading_h
+        data_tests: [not_null, unique]
+  - name: link_meter_reading
+    columns:
+      - name: hk_meter_reading_l
+        data_tests: [not_null, unique]
+  - name: hub_pricing_zone
+    columns:
+      - name: hk_pricing_zone_h
+        data_tests: [not_null, unique]
+      - name: state_code
+        data_tests: [not_null, unique]
+  - name: hub_price
+    columns:
+      - name: hk_price_h
+        data_tests: [not_null, unique]
+      - name: price_id
+        data_tests: [not_null, unique]
+  - name: link_pricing_zone_price
+    columns:
+      - name: hk_pricing_zone_price_l
+        data_tests: [not_null, unique]
+  - name: link_meter_pricing_zone
+    columns:
+      - name: hk_meter_pricing_zone_l
+        data_tests: [not_null, unique]
+      - name: hk_meter_h
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('hub_meter')
+                field: hk_meter_h
+      - name: hk_pricing_zone_h
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('hub_pricing_zone')
+                field: hk_pricing_zone_h
+  - name: sat_price_details
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hk_price_h, ldts]
+  - name: sat_pricing_zone_details
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hk_pricing_zone_h, ldts]

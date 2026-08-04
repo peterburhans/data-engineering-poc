@@ -1,0 +1,289 @@
+services:
+  localstack:
+    image: ${LOCALSTACK_IMAGE:-localstack/localstack-pro:2026.3.0}
+    environment:
+      SERVICES: s3,kinesis,firehose,iam,logs,secretsmanager,sts,dynamodb
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+      MAIN_CONTAINER_NETWORK: ${DEPLOYMENT_ENV:-local}_${PROJECT_NAME:-smart_meter}_net
+      DEBUG: ${LOCALSTACK_DEBUG:-0}
+      PERSISTENCE: 1
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      RAW_BUCKET: ${RAW_BUCKET:-local-smart-meter-raw-s3}
+      CURATED_BUCKET: ${CURATED_BUCKET:-local-smart-meter-curated-s3}
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./platform/localstack/init.sh:/etc/localstack/init/ready.d/10-lake-buckets.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  terraform:
+    image: hashicorp/terraform:1.9
+    working_dir: /workspace/infra/terraform
+    volumes:
+      - .:/workspace
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      TF_VAR_aws_endpoint_url: http://localstack:4566
+      TF_VAR_environment: ${DEPLOYMENT_ENV:-local}
+      TF_VAR_name: ${PROJECT_NAME:-smart_meter}
+      TF_VAR_force_destroy_buckets: "true"
+      TF_VAR_mooncake_password: ${MOONCAKE_PASSWORD:-mooncake}
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  mock-data-service:
+    image: ${MOCK_DATA_IMAGE:-local-smart-meter-mock-data:latest}
+    build:
+      context: .
+      dockerfile: services/mock-data-service/Dockerfile
+    env_file: .env
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      RAW_BUCKET: ${RAW_BUCKET:-local-smart-meter-raw-s3}
+      KINESIS_STREAM_NAME: ${KINESIS_STREAM_NAME:-local_smart_meter_events_kds}
+      PRICING_STREAM_NAME: ${PRICING_STREAM_NAME:-local_smart_meter_prices_kds}
+      PRICING_REFRESH_SECONDS: ${PRICING_REFRESH_SECONDS:-300}
+    depends_on:
+      localstack:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  glue-runner:
+    image: ${GLUE_RUNNER_IMAGE:-local-smart-meter-glue:5}
+    build:
+      context: .
+      dockerfile: platform/glue/Dockerfile
+    profiles: [tools]
+    command: ["true"]
+
+  control-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+      POSTGRES_DB: platform
+    volumes:
+      - control-db-data:/var/lib/postgresql/data
+      - ./platform/control-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mooncake:
+    image: mooncakelabs/pg_mooncake:latest
+    shm_size: 1gb
+    environment:
+      POSTGRES_USER: mooncake
+      POSTGRES_PASSWORD: ${MOONCAKE_PASSWORD:-mooncake}
+      POSTGRES_DB: warehouse
+    volumes:
+      - mooncake-data:/var/lib/postgresql
+      - ./platform/mooncake/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    depends_on:
+      localstack:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mooncake -d warehouse"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  marquez-db:
+    image: postgres:14-alpine
+    environment:
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+      POSTGRES_DB: marquez
+    volumes:
+      - marquez-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marquez -d marquez"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  marquez-api:
+    image: marquezproject/marquez:0.50.0
+    environment:
+      MARQUEZ_PORT: 5000
+      MARQUEZ_ADMIN_PORT: 5001
+      POSTGRES_HOST: marquez-db
+      POSTGRES_PORT: 5432
+      SEARCH_ENABLED: "false"
+    depends_on:
+      marquez-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:5001/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  marquez:
+    image: marquezproject/marquez-web:0.50.0
+    ports:
+      - "6004:3000"
+    environment:
+      MARQUEZ_HOST: marquez-api
+      MARQUEZ_PORT: 5000
+      WEB_PORT: 3000
+      REACT_APP_ADVANCED_SEARCH: "false"
+    depends_on:
+      marquez-api:
+        condition: service_healthy
+
+  airflow-init:
+    build: &airflow-build
+      context: .
+      dockerfile: platform/airflow/Dockerfile
+    command:
+      - bash
+      - -c
+      - >-
+        /home/airflow/dbt_venv/bin/dbt build
+        --project-dir /opt/airflow/dbt
+        --profiles-dir /opt/airflow/dbt
+        --target-path /opt/airflow/dbt/target
+        && airflow version
+    environment: &airflow-environment
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+      AIRFLOW__API_AUTH__JWT_SECRET: local-airflow-jwt-secret-change-me
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@control-db/airflow
+      AIRFLOW__COSMOS__DBT_DOCS_PROJECTS: '{"smart-meter":{"dir":"/opt/airflow/dbt/target","index":"index.html"}}'
+      AIRFLOW__COSMOS__USE_DATASET_AIRFLOW3_URI_STANDARD: "true"
+      AIRFLOW__OPENLINEAGE__NAMESPACE: ${DEPLOYMENT_ENV:-local}_${PROJECT_NAME:-smart_meter}
+      AIRFLOW__OPENLINEAGE__TRANSPORT: '{"type":"http","url":"http://marquez-api:5000","endpoint":"api/v1/lineage"}'
+      AIRFLOW_CONN_MOONCAKE: '{"conn_type":"postgres","host":"mooncake","login":"mooncake","password":"${MOONCAKE_PASSWORD:-mooncake}","schema":"warehouse","port":5432}'
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localstack:4566
+      DBT_LOG_PATH: /opt/airflow/logs/dbt
+      DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+      MOONCAKE_PASSWORD: ${MOONCAKE_PASSWORD:-mooncake}
+      GLUE_RUNNER_IMAGE: ${GLUE_RUNNER_IMAGE:-local-smart-meter-glue:5}
+      GLUE_LOCAL_PARALLELISM: ${GLUE_LOCAL_PARALLELISM:-4}
+      HOST_PROJECT_ROOT: ${PWD}
+      COMPOSE_NETWORK_NAME: ${DEPLOYMENT_ENV:-local}_${PROJECT_NAME:-smart_meter}_net
+      LOCAL_BOOKMARK_TABLE: ${LOCAL_BOOKMARK_TABLE:-local_smart_meter_bookmarks_ddb}
+      WAREHOUSE_SECRET_ID: ${WAREHOUSE_SECRET_ID:-local_smart_meter_warehouse_sm}
+      RAW_BUCKET: ${RAW_BUCKET:-local-smart-meter-raw-s3}
+      CURATED_BUCKET: ${CURATED_BUCKET:-local-smart-meter-curated-s3}
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+    volumes: &airflow-volumes
+      - ./platform/airflow/dags:/opt/airflow/dags
+      - ./platform/dbt:/opt/airflow/dbt
+      - airflow-logs:/opt/airflow/logs
+      - airflow-logs:/opt/airflow/dbt/target
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: &airflow-groups
+      - "${DOCKER_GID:-1001}"
+    depends_on:
+      control-db:
+        condition: service_healthy
+      mooncake:
+        condition: service_healthy
+
+  airflow-apiserver:
+    build: *airflow-build
+    command: api-server
+    ports:
+      - "6001:8080"
+    environment:
+      <<: *airflow-environment
+      _AIRFLOW_DB_MIGRATE: "false"
+      _AIRFLOW_WWW_USER_CREATE: "false"
+    volumes: *airflow-volumes
+    group_add: *airflow-groups
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  airflow-scheduler:
+    build: *airflow-build
+    command: scheduler
+    environment:
+      <<: *airflow-environment
+      _AIRFLOW_DB_MIGRATE: "false"
+      _AIRFLOW_WWW_USER_CREATE: "false"
+    volumes: *airflow-volumes
+    group_add: *airflow-groups
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    build: *airflow-build
+    command: dag-processor
+    environment:
+      <<: *airflow-environment
+      _AIRFLOW_DB_MIGRATE: "false"
+      _AIRFLOW_WWW_USER_CREATE: "false"
+    volumes: *airflow-volumes
+    group_add: *airflow-groups
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  superset-init:
+    build: ./platform/superset
+    command: >
+      bash -c "superset db upgrade &&
+      superset fab create-admin --username admin --firstname Data --lastname Engineer
+      --email admin@example.com --password '${SUPERSET_ADMIN_PASSWORD:-admin}' || true;
+      superset fab reset-password --username admin --password '${SUPERSET_ADMIN_PASSWORD:-admin}' &&
+      superset init &&
+      python /app/pythonpath/bootstrap_dashboard.py"
+    environment: &superset-environment
+      SUPERSET_SECRET_KEY: local-development-secret-key-change-me
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+    depends_on:
+      control-db:
+        condition: service_healthy
+
+  superset:
+    build: ./platform/superset
+    command: ["/bin/sh", "-c", "gunicorn --bind 0.0.0.0:8088 --workers 2 --timeout 120 'superset.app:create_app()'"]
+    ports:
+      - "6002:8088"
+    environment: *superset-environment
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+
+volumes:
+  localstack-data:
+  control-db-data:
+  mooncake-data:
+  airflow-logs:
+  marquez-db-data:
+
+networks:
+  default:
+    name: ${DEPLOYMENT_ENV:-local}_${PROJECT_NAME:-smart_meter}_net

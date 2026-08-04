@@ -1,0 +1,172 @@
+version: 2
+
+models:
+  - name: time_spine_hourly
+    description: Hourly calendar spine supporting operational smart-meter metrics.
+    time_spine:
+      standard_granularity_column: date_hour
+    columns:
+      - name: date_hour
+        granularity: hour
+        data_tests: [not_null, unique]
+
+  - name: time_spine_daily
+    description: Daily calendar spine used by MetricFlow for time-aware metric queries.
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_day
+        granularity: day
+        data_tests: [not_null, unique]
+
+  - name: time_spine_monthly
+    description: Monthly calendar spine used by MetricFlow for month-grain metric queries.
+    time_spine:
+      standard_granularity_column: date_month
+    columns:
+      - name: date_month
+        granularity: month
+        data_tests: [not_null, unique]
+
+  - name: time_spine_yearly
+    description: Yearly calendar spine used by MetricFlow for year-grain metric queries.
+    time_spine:
+      standard_granularity_column: date_year
+    columns:
+      - name: date_year
+        granularity: year
+        data_tests: [not_null, unique]
+
+semantic_models:
+  - name: meter_readings
+    description: >-
+      Governed smart-meter reading grain sourced from the Data Vault information
+      layer. One row represents one immutable meter reading event.
+    model: ref('int_meter_readings')
+    defaults:
+      agg_time_dimension: reading_time
+    entities:
+      - name: reading
+        type: primary
+        expr: event_id
+      - name: meter
+        type: foreign
+        expr: meter_id
+    dimensions:
+      - name: reading_time
+        type: time
+        expr: event_time
+        type_params:
+          time_granularity: hour
+      - name: schema_version
+        type: categorical
+      - name: region
+        type: categorical
+        expr: us_region
+      - name: state_code
+        type: categorical
+    measures:
+      - name: energy_consumed_kwh
+        description: Additive electrical energy consumed in kilowatt-hours.
+        agg: sum
+        expr: energy_kwh
+      - name: reading_count
+        description: Number of smart-meter reading events.
+        agg: count
+        expr: event_id
+      - name: distinct_meter_count
+        description: Number of distinct meters reporting readings.
+        agg: count_distinct
+        expr: meter_id
+      - name: average_voltage_v
+        description: Mean observed voltage in volts.
+        agg: average
+        expr: voltage_v
+      - name: average_current_a
+        description: Mean observed current in amperes.
+        agg: average
+        expr: current_a
+      - name: average_power_factor
+        description: Mean observed power factor.
+        agg: average
+        expr: power_factor
+
+metrics:
+  - name: total_energy_consumed_kwh
+    label: Total Energy Consumed (kWh)
+    description: Sum of reported energy consumption.
+    type: simple
+    type_params:
+      measure: energy_consumed_kwh
+
+  - name: total_readings
+    label: Total Meter Readings
+    description: Count of smart-meter reading events.
+    type: simple
+    type_params:
+      measure: reading_count
+
+  - name: reporting_meters
+    label: Reporting Meters
+    description: Distinct meters reporting at least one reading.
+    type: simple
+    type_params:
+      measure: distinct_meter_count
+
+  - name: avg_voltage_v
+    label: Average Voltage (V)
+    description: Mean voltage across readings.
+    type: simple
+    type_params:
+      measure: average_voltage_v
+
+  - name: avg_current_a
+    label: Average Current (A)
+    description: Mean current across readings.
+    type: simple
+    type_params:
+      measure: average_current_a
+
+  - name: avg_power_factor
+    label: Average Power Factor
+    description: Mean power factor across readings.
+    type: simple
+    type_params:
+      measure: average_power_factor
+
+  - name: energy_per_reporting_meter_kwh
+    label: Energy per Reporting Meter (kWh)
+    description: Reported energy divided by the number of reporting meters.
+    type: ratio
+    type_params:
+      numerator: total_energy_consumed_kwh
+      denominator: reporting_meters
+
+saved_queries:
+  - name: daily_meter_kpis
+    label: Daily Smart Meter KPIs
+    description: Daily fleet-level energy, availability, and electrical indicators.
+    query_params:
+      metrics:
+        - total_energy_consumed_kwh
+        - total_readings
+        - reporting_meters
+        - avg_voltage_v
+        - avg_power_factor
+      group_by:
+        - "Dimension('reading__region')"
+        - "Dimension('reading__state_code')"
+        - "TimeDimension('metric_time', 'day')"
+
+  - name: meter_electrical_kpis
+    label: Meter Electrical KPIs
+    description: Per-meter consumption and electrical metrics by day.
+    query_params:
+      metrics:
+        - total_energy_consumed_kwh
+        - total_readings
+        - avg_voltage_v
+        - avg_power_factor
+      group_by:
+        - "Entity('meter')"
+        - "TimeDimension('metric_time', 'day')"

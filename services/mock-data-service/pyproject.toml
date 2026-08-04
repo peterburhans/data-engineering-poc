@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mock-data-service"
+version = "0.1.0"
+description = "Extensible mock smart-meter and electricity-pricing data service"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.34,<2",
+    "fastapi==0.116.1",
+    "uvicorn==0.35.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "ruff>=0.12,<1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../../libs/data_contracts"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

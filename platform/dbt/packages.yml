@@ -1,0 +1,5 @@
+packages:
+  - package: ScalefreeCOM/datavault4dbt
+    version: 2.0.1
+  - package: dbt-labs/dbt_utils
+    version: 1.4.1

@@ -1,0 +1,130 @@
+version: 2
+models:
+  - name: mart_meter_operations_periodic
+    description: Pre-aggregated operational metrics supporting dashboard drill-up and drill-down.
+    columns:
+      - name: period_grain
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Year, Month, Week, Day, Hour]
+      - name: period_start
+        data_tests: [not_null]
+      - name: meter_id
+        data_tests: [not_null]
+      - name: reading_count
+        data_tests: [not_null]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              [period_grain, period_start, meter_id, state_code]
+  - name: dim_meter
+    columns:
+      - name: meter_key
+        data_tests: [not_null, unique]
+      - name: meter_id
+        data_tests: [not_null, unique]
+  - name: dim_date
+    description: Conformed calendar-date dimension derived from the governed daily time spine.
+    columns:
+      - name: date_key
+        data_tests: [not_null, unique]
+  - name: dim_time
+    description: Conformed hour-of-day dimension derived from the governed hourly time spine.
+    columns:
+      - name: time_key
+        data_tests: [not_null, unique]
+  - name: dim_pricing_zone
+    columns:
+      - name: pricing_zone_key
+        data_tests: [not_null, unique]
+      - name: state_code
+        data_tests: [not_null, unique]
+  - name: fact_hourly_energy_billing
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [meter_key, reading_hour]
+    columns:
+      - name: meter_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_meter')
+                field: meter_key
+      - name: pricing_zone_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_pricing_zone')
+                field: pricing_zone_key
+      - name: date_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: time_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_time')
+                field: time_key
+  - name: fact_meter_reading
+    description: Atomic smart-meter telemetry fact at one immutable event per row.
+    columns:
+      - name: reading_key
+        data_tests: [not_null, unique]
+      - name: event_id
+        data_tests: [not_null, unique]
+      - name: meter_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_meter')
+                field: meter_key
+      - name: date_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: time_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_time')
+                field: time_key
+      - name: pricing_zone_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_pricing_zone')
+                field: pricing_zone_key
+  - name: mart_executive_billing_periodic
+    description: Pre-aggregated executive billing metrics at hourly, daily, weekly, monthly, and yearly grains.
+    columns:
+      - name: period_grain
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Year, Month, Week, Day, Hour]
+      - name: period_start
+        data_tests: [not_null]
+      - name: gross_billed
+        data_tests: [not_null]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [period_grain, period_start, meter_id, state_code]

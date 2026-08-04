@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: int_electricity_prices
+    description: Effective-dated electricity prices reconstructed exclusively from Raw Data Vault entities.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [state_code, effective_from]
+    columns:
+      - name: price_id
+        data_tests: [not_null, unique]
+      - name: state_code
+        data_tests: [not_null]
+      - name: effective_from
+        data_tests: [not_null]
+      - name: price_per_kwh
+        data_tests: [not_null]
+
+  - name: int_meter_readings_priced
+    description: Meter events aligned to one effective regional price using state, region, and event time.
+    columns:
+      - name: event_id
+        data_tests: [not_null, unique]
+      - name: price_id
+        data_tests: [not_null]
+      - name: price_per_kwh
+        data_tests: [not_null]
+      - name: usage_revenue
+        data_tests: [not_null]

@@ -1,0 +1,85 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: pip install boto3 fastapi==0.116.1 pg8000==1.31.5 pyspark==3.5.5 pytest==8.4.2 ruff==0.12.7 uvicorn==0.35.0
+      - run: ruff check jobs/glue services/mock-data-service scripts
+      - run: ruff format --check jobs/glue services/mock-data-service scripts
+      - run: PYTHONPATH=services/mock-data-service/src pytest -p no:cacheprovider services/mock-data-service/tests
+      - run: PYTHONPATH=jobs/glue/lib pytest -p no:cacheprovider jobs/glue/tests
+      - run: GLUE_SPARK_TESTS=1 PYTHONPATH=jobs/glue/lib pytest -p no:cacheprovider jobs/glue/tests/test_spark_validation.py
+  glue-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f platform/glue/Dockerfile -t local-smart-meter-glue:5 .
+      - run: |
+          docker run --rm \
+            -e GLUE_SPARK_TESTS=1 \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e PYTHONPATH=/usr/share/aws/glue-pds/PyGlue.zip:/usr/lib/spark/python/lib:/home/hadoop/workspace/jobs/glue/lib \
+            -v "$PWD:/home/hadoop/workspace" \
+            -w /home/hadoop/workspace \
+            local-smart-meter-glue:5 \
+            python3 -m pytest -p no:cacheprovider jobs/glue/tests/test_spark_validation.py
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - run: terraform -chdir=infra/terraform fmt -check -recursive
+      - run: terraform -chdir=infra/terraform init -backend=false -input=false
+      - run: terraform -chdir=infra/terraform validate
+
+  dbt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f platform/airflow/Dockerfile -t smart-meter-airflow .
+      - run: docker network create smart-meter-ci
+      - run: |
+          docker run -d --name mooncake --network smart-meter-ci \
+            -e POSTGRES_USER=mooncake -e POSTGRES_PASSWORD=mooncake \
+            -e POSTGRES_DB=warehouse \
+            -v "$PWD/platform/mooncake/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
+            mooncakelabs/pg_mooncake:latest
+          for attempt in $(seq 1 30); do
+            docker exec mooncake pg_isready -U mooncake -d warehouse && exit 0
+            sleep 2
+          done
+          docker logs mooncake
+          exit 1
+      - run: |
+          docker run --rm --network smart-meter-ci \
+            -e MOONCAKE_PASSWORD=mooncake \
+            -v "$PWD/platform/dbt:/opt/airflow/dbt" \
+            --entrypoint /home/airflow/dbt_venv/bin/dbt smart-meter-airflow \
+            parse --project-dir /opt/airflow/dbt --profiles-dir /opt/airflow/dbt
+      - run: |
+          docker run --rm --network smart-meter-ci \
+            -e MOONCAKE_PASSWORD=mooncake \
+            -v "$PWD/platform/dbt:/opt/airflow/dbt" \
+            --entrypoint /home/airflow/dbt_venv/bin/dbt smart-meter-airflow \
+            build --project-dir /opt/airflow/dbt --profiles-dir /opt/airflow/dbt

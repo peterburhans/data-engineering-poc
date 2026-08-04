@@ -1,0 +1,81 @@
+version: 2
+
+semantic_models:
+  - name: billing_meter_dimension
+    model: ref('dim_meter')
+    entities:
+      - name: meter
+        type: primary
+        expr: meter_key
+    dimensions:
+      - name: meter_id
+        type: categorical
+      - name: region
+        type: categorical
+        expr: us_region
+      - name: state_code
+        type: categorical
+
+  - name: billing_pricing_zone_dimension
+    model: ref('dim_pricing_zone')
+    entities:
+      - name: pricing_zone
+        type: primary
+        expr: pricing_zone_key
+    dimensions:
+      - name: currency_code
+        type: categorical
+
+  - name: hourly_energy_billing
+    model: ref('fact_hourly_energy_billing')
+    defaults:
+      agg_time_dimension: billing_time
+    entities:
+      - name: meter_hour_bill
+        type: primary
+        expr: meter_key || '|' || reading_hour::text
+      - name: meter
+        type: foreign
+        expr: meter_key
+      - name: pricing_zone
+        type: foreign
+        expr: pricing_zone_key
+    dimensions:
+      - name: billing_time
+        type: time
+        expr: reading_hour
+        type_params: {time_granularity: hour}
+    measures:
+      - {name: billed_energy_amount_kwh, agg: sum, expr: energy_kwh}
+      - {name: usage_revenue_amount, agg: sum, expr: usage_revenue}
+      - {name: billed_meter_count, agg: count_distinct, expr: meter_key}
+
+metrics:
+  - name: billed_energy_kwh
+    label: Billed Energy (kWh)
+    type: simple
+    type_params: {measure: billed_energy_amount_kwh}
+  - name: usage_revenue
+    label: Usage Revenue
+    type: simple
+    type_params: {measure: usage_revenue_amount}
+  - name: billed_meters
+    label: Billed Meters
+    type: simple
+    type_params: {measure: billed_meter_count}
+  - name: realized_usage_price_per_kwh
+    label: Realized Usage Price per kWh
+    type: ratio
+    type_params:
+      numerator: usage_revenue
+      denominator: billed_energy_kwh
+
+saved_queries:
+  - name: daily_regional_billing_kpis
+    label: Daily Regional Billing KPIs
+    query_params:
+      metrics: [billed_energy_kwh, usage_revenue, billed_meters, realized_usage_price_per_kwh]
+      group_by:
+        - "Dimension('meter__region')"
+        - "Dimension('meter__state_code')"
+        - "TimeDimension('metric_time', 'day')"

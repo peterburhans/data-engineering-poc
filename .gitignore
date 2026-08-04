@@ -1,0 +1,85 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Python bytecode and tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Python environments and packaging
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Terraform working data, state, plans, and local overrides
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Keep dependency selections reproducible
+!.terraform.lock.hcl
+
+# dbt generated artifacts and downloaded packages
+platform/dbt/target/
+platform/dbt/logs/
+platform/dbt/dbt_packages/
+platform/dbt/.user.yml
+
+# Airflow and local platform runtime data
+airflow/logs/
+logs/
+airflow.db
+airflow.db-shm
+airflow.db-wal
+standalone_admin_password.txt
+superset.db
+
+# Local Docker Compose customizations
+docker-compose.override.yml
+
+# Editors
+.codex/
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini

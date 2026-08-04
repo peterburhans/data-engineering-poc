@@ -1,0 +1,12 @@
+smart_meter:
+  target: local
+  outputs:
+    local:
+      type: postgres
+      host: mooncake
+      port: 5432
+      user: mooncake
+      password: "{{ env_var('MOONCAKE_PASSWORD', 'mooncake') }}"
+      dbname: warehouse
+      schema: analytics
+      threads: 4

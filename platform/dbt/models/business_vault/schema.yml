@@ -1,0 +1,82 @@
+version: 2
+
+models:
+  - name: control_snap_v0
+    description: Persistent daily reporting calendar at the stable 06:00 UTC business cutoff.
+    columns:
+      - name: sdts
+        data_tests: [not_null, unique]
+
+  - name: control_snap_v1
+    description: Logarithmically retained reporting periods used to activate and clean PIT snapshots.
+    columns:
+      - name: sdts
+        data_tests: [not_null, unique]
+      - name: is_active
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+      - name: is_latest
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+
+  - name: pit_meter
+    description: Retained reporting-period PIT locating the applicable meter-details satellite row.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hk_meter_h, sdts]
+    columns:
+      - name: hk_meter_d
+        data_tests: [not_null, unique]
+      - name: hk_meter_h
+        data_tests: [not_null]
+      - name: sdts
+        data_tests: [not_null]
+
+  - name: pit_reading
+    description: Retained reporting-period PIT locating the applicable reading-metrics satellite row.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hk_reading_h, sdts]
+    columns:
+      - name: hk_reading_d
+        data_tests: [not_null, unique]
+      - name: hk_reading_h
+        data_tests: [not_null]
+      - name: sdts
+        data_tests: [not_null]
+
+  - name: pit_price
+    description: Retained reporting-period PIT locating the applicable effective-price satellite row.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hk_price_h, sdts]
+    columns:
+      - name: hk_price_d
+        data_tests: [not_null, unique]
+      - name: hk_price_h
+        data_tests: [not_null]
+      - name: sdts
+        data_tests: [not_null]
+
+  - name: pit_pricing_zone
+    description: Retained reporting-period PIT locating the applicable pricing-zone details row.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hk_pricing_zone_h, sdts]
+    columns:
+      - name: hk_pricing_zone_d
+        data_tests: [not_null, unique]
+      - name: hk_pricing_zone_h
+        data_tests: [not_null]
+      - name: sdts
+        data_tests: [not_null]
