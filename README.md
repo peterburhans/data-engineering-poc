@@ -10,6 +10,123 @@ The repository is deliberately local-first. Docker Compose provides the runtime 
 LocalStack provides the AWS data-plane services. I have tried to emulate a live data
 platform as closely as practical while keeping the whole setup runnable locally.
 
+## Getting started
+
+This project was developed and run on [WSL 2](https://learn.microsoft.com/windows/wsl/install)
+with Ubuntu. Docker was provided through
+[Docker Desktop's WSL 2 integration](https://docs.docker.com/desktop/features/wsl/).
+Linux should work with the same commands; macOS should also work, although the complete
+stack has been exercised primarily in the WSL 2 environment.
+
+Install these host tools before starting:
+
+- [Git](https://git-scm.com/downloads) to clone the repository.
+- [Docker](https://docs.docker.com/engine/install/) with the Docker daemon running.
+- [Docker Compose v2](https://docs.docker.com/compose/install/) so the
+  `docker compose` command is available.
+- [GNU Make](https://www.gnu.org/software/make/) to run the repository commands.
+- A [LocalStack account](https://app.localstack.cloud/) and Developer Auth Token.
+
+Python, Terraform, Glue, dbt, Airflow, Superset, and the other platform dependencies run
+inside containers; they do not need to be installed directly on the host.
+
+To configure LocalStack:
+
+1. [Create or sign in to a LocalStack account](https://app.localstack.cloud/).
+2. Open the LocalStack Web Application's
+   [Auth Tokens page](https://app.localstack.cloud/workspace/auth-tokens).
+3. Copy your **Developer Auth Token**. Developer tokens are intended for local use;
+   LocalStack provides separate CI tokens for non-developer environments.
+4. Run `make init` to create `.env` from `.env.example`.
+5. Paste the token into `.env` without quotes or trailing whitespace:
+
+   ```dotenv
+   LOCALSTACK_AUTH_TOKEN=ls-...
+   ```
+
+The token is a secret. Do not commit `.env` or paste the token into Compose, Terraform,
+or source files. If it is exposed, rotate it from the Auth Tokens page. See LocalStack's
+[Auth Token documentation](https://docs.localstack.cloud/aws/getting-started/auth-token/)
+for token types, Docker Compose configuration, rotation, and troubleshooting.
+
+Start the platform:
+
+```bash
+make init
+# Add your LocalStack Developer Auth Token to .env, then start the platform
+make up
+```
+
+`make up` starts LocalStack, applies the Terraform, builds the Glue runner, initializes
+the warehouse and dbt models, and starts the platform services. It does not start the
+event producer. Start live meter and price events explicitly:
+
+```bash
+make events
+```
+
+The local UIs are:
+
+| Service | URL | Login |
+| --- | --- | --- |
+| Airflow | <http://localhost:6001> | `admin` / `admin` |
+| Superset | <http://localhost:6002> | `admin` / `admin` |
+| Marquez | <http://localhost:6004> | none |
+
+Mooncake and LocalStack are not exposed to the host. Containers reach them at
+`mooncake:5432` and `localstack:4566`.
+
+Airflow exposes dbt Docs under **Browse → dbt Docs**. Marquez shows runtime lineage from
+Airflow/Cosmos plus the lake, relation, and column lineage published by the
+`smart_meter_lineage_catalog` DAG.
+
+### Backfills and reprocessing
+
+Historical generation writes deterministic daily NDJSON directly to raw S3. It bypasses
+Kinesis and Firehose on purpose; streaming a year of seed data through a local broker is
+slow and does not prove anything useful.
+
+```bash
+DAYS=365 make backfill
+```
+
+Run `make up` first so LocalStack and its Terraform-managed resources exist. The backfill
+command only generates data; it does not provision infrastructure. The generated range
+is aligned to complete UTC days and the command rebuilds the producer image before it
+runs.
+
+Then trigger one windowed warehouse run:
+
+```bash
+MODE=backfill \
+START=2025-08-04T00:00:00Z \
+END=2026-08-04T00:00:00Z \
+GRAIN=day \
+make pipeline
+```
+
+The window is half-open: start is included and end is excluded. Bounds must be UTC
+midnight because curated files are partitioned by day. `GRAIN=day` is the safe default;
+`GRAIN=week` uses Monday-to-Monday UTC batches, while `GRAIN=month` further reduces
+scheduling overhead with larger batches. Glue reads only the S3 partition roots
+intersecting the window and uses dynamic partition overwrite, so a backfill cannot erase
+curated partitions outside its range.
+
+In the Airflow UI, choose **Trigger → Single Run** and supply the same values:
+
+```json
+{
+  "processing_mode": "backfill",
+  "backfill_start": "2025-08-04T00:00:00Z",
+  "backfill_end": "2026-08-04T00:00:00Z",
+  "backfill_grain": "day"
+}
+```
+
+Do not use Airflow's scheduled-run backfill screen for this DAG. Its normal schedule is
+every 15 minutes, while the Glue jobs operate on an explicit S3 window. Recreating a year
+of 15-minute logical runs would only queue thousands of duplicate replays.
+
 ## Architecture
 
 The diagrams in this README use Mermaid, so GitHub renders them and they can also be
@@ -397,6 +514,34 @@ erDiagram
         boolean is_active
         boolean is_latest
     }
+    HUB_METER {
+        string hk_meter_h PK
+    }
+    SAT_METER_DETAILS {
+        string hk_meter_h FK
+        timestamp ldts
+    }
+    HUB_READING {
+        string hk_reading_h PK
+    }
+    SAT_READING_METRICS {
+        string hk_reading_h FK
+        timestamp ldts
+    }
+    HUB_PRICING_ZONE {
+        string hk_pricing_zone_h PK
+    }
+    SAT_PRICING_ZONE_DETAILS {
+        string hk_pricing_zone_h FK
+        timestamp ldts
+    }
+    HUB_PRICE {
+        string hk_price_h PK
+    }
+    SAT_PRICE_DETAILS {
+        string hk_price_h FK
+        timestamp ldts
+    }
     PIT_METER {
         string hk_meter_d PK
         string hk_meter_h FK
@@ -682,87 +827,6 @@ an executive view does not issue an all-history hourly query on first load. Metr
 stays in dbt and MetricFlow; Superset is responsible for filtering and visualization.
 
 ![Executive Billing and Revenue dashboard](docs/images/superset-executive-billing-revenue.png)
-
-## Running it
-
-You need Docker Compose v2, `make`, and a LocalStack auth token.
-
-```bash
-make init
-# Set LOCALSTACK_AUTH_TOKEN in .env
-make up
-```
-
-`make up` initializes and applies the LocalStack Terraform before starting the platform.
-
-`make up` starts the platform but not the event producer. Start live meter and price
-events explicitly:
-
-```bash
-make events
-```
-
-The local UIs are:
-
-| Service | URL | Login |
-| --- | --- | --- |
-| Airflow | <http://localhost:6001> | `admin` / `admin` |
-| Superset | <http://localhost:6002> | `admin` / `admin` |
-| Marquez | <http://localhost:6004> | none |
-
-Mooncake and LocalStack are not exposed to the host. Containers reach them at
-`mooncake:5432` and `localstack:4566`.
-
-Airflow exposes dbt Docs under **Browse → dbt Docs**. Marquez shows runtime lineage from
-Airflow/Cosmos plus the lake, relation, and column lineage published by the
-`smart_meter_lineage_catalog` DAG.
-
-## Backfills and reprocessing
-
-Historical generation writes deterministic daily NDJSON directly to raw S3. It bypasses
-Kinesis and Firehose on purpose; streaming a year of seed data through a local broker is
-slow and does not prove anything useful.
-
-```bash
-DAYS=365 make backfill
-```
-
-Run `make up` first so LocalStack and its Terraform-managed resources exist. The backfill
-command only generates data; it does not provision infrastructure. The generated range
-is aligned to complete UTC days and the command rebuilds the producer image before it
-runs.
-
-Then trigger one windowed warehouse run:
-
-```bash
-MODE=backfill \
-START=2025-08-04T00:00:00Z \
-END=2026-08-04T00:00:00Z \
-GRAIN=day \
-make pipeline
-```
-
-The window is half-open: start is included and end is excluded. Bounds must be UTC
-midnight because curated files are partitioned by day. `GRAIN=day` is the safe default;
-`GRAIN=week` uses Monday-to-Monday UTC batches, while `GRAIN=month` further reduces
-scheduling overhead with larger batches. Glue reads only the S3
-partition roots intersecting the window and uses dynamic partition overwrite, so a
-backfill cannot erase curated partitions outside its range.
-
-In the Airflow UI, choose **Trigger → Single Run** and supply the same values:
-
-```json
-{
-  "processing_mode": "backfill",
-  "backfill_start": "2025-08-04T00:00:00Z",
-  "backfill_end": "2026-08-04T00:00:00Z",
-  "backfill_grain": "day"
-}
-```
-
-Do not use Airflow's scheduled-run backfill screen for this DAG. Its normal schedule is
-every 15 minutes, while the Glue jobs operate on an explicit S3 window. Recreating a year
-of 15-minute logical runs would only queue thousands of duplicate replays.
 
 ## Useful commands
 
